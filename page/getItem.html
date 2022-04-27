@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="static/assets/global/plugins/bootstrap/css/bootstrap.min.css" rel="stylesheet" type="text/css"/>
+<link href="static/assets/global/css/components.css" rel="stylesheet" type="text/css"/>
+<link href="static/assets/admin/pages/css/login.css" rel="stylesheet" type="text/css"/>
+<script src="static/assets/global/plugins/jquery-1.11.0.min.js" type="text/javascript"></script>
+
+
+</head>
+
+<body class="login">
+	<div class="content">
+		<h3 class="form-title">商品详情</h3>
+		<div id="promoStartDateContainer" class="form-group">
+			<label style="color:blue" id="promoStatus" class="control-label"></label>
+			<div>
+				<label style="color:red" class="control-label" id="promoStartDate"/>
+			</div>	
+		</div>	
+		<div class="form-group">
+			<div>
+				<label class="control-label" id="title"/>
+			</div>	
+		</div>
+		<div class="form-group">
+			<label class="control-label">商品描述</label>
+			<div>
+				<label class="control-label" id="description"/>
+			</div>	
+		</div>	
+		<div id="normalPriceContainer" class="form-group">
+			<label class="control-label">价格</label>
+			<div>
+				<label class="control-label" id="price"/>
+			</div>	
+		</div>	
+		<div id="promoPriceContainer" style="display: none;" class="form-group">
+			<label style="color:red" class="control-label">秒杀价格</label>
+			<div>
+				<label style="color:red" class="control-label" id="promoPrice"/>
+			</div>	
+		</div>	
+		<div class="form-group">
+			<div>
+				<img style="width:200px;height:auto" id="imgUrl"/>
+			</div>	
+		</div>
+		<div class="form-group">
+			<label class="control-label">库存</label>
+			<div>
+				<label class="control-label" id="stock"/>
+			</div>	
+		</div>	
+		<div class="form-group">
+			<label class="control-label">销量</label>
+			<div>
+				<label class="control-label" id="sales"/>
+			</div>	
+		</div>		
+		<div class="form-actions">
+			<button class="btn blue" id="createorder" type="submit">
+				下单
+			</button>	
+		</div>
+		<div id="verifyDiv" style="display:none;" class="form-actions">
+			<img src=""/>
+			<input type="text" id="verifyContent" value=""/>
+			<button class="btn blue" id="verifyButton" type="submit">
+				验证
+			</button>
+		</div>
+	</div>	
+
+
+</body>
+
+
+<script>
+
+function getParam(paramName) { 
+    paramValue = "", isFound = !1; 
+    if (this.location.search.indexOf("?") == 0 && this.location.search.indexOf("=") > 1) { 
+        arrSource = unescape(this.location.search).substring(1, this.location.search.length).split("&"), i = 0; 
+        while (i < arrSource.length && !isFound) arrSource[i].indexOf("=") > 0 && arrSource[i].split("=")[0].toLowerCase() == paramName.toLowerCase() && (paramValue = arrSource[i].split("=")[1], isFound = !0), i++ 
+    } 
+    return paramValue == "" && (paramValue = null), paramValue 
+} 
+
+var g_itemVO = {};
+var seckillCountDown;
+
+	jQuery(document).ready(function(){
+		$("#verifyButton").on("click",function(){
+			var token = window.localStorage["token"];
+			$.ajax({
+				type:"POST",
+				contentType:"application/x-www-form-urlencoded",
+				url:"http://localhost:8080/seckill/order/generateToken?token="+token,
+				data:{
+					"itemId":g_itemVO.id,
+					"promoId":g_itemVO.promoId,
+					"verifyCode":$("#verifyContent").val()
+				},
+				xhrFields:{withCredentials:true},
+				success:function(data){
+					//先获取秒杀令牌 获取成功后再ajax请求seckill/order/create?token="+token,对比promoToken和redis中的令牌是否一致
+					if(data.status == "success"){
+						var promoToken = data.data;
+						$.ajax({
+							type:"POST",
+							contentType:"application/x-www-form-urlencoded",
+							url:"http://localhost:8080/seckill/order/create?token="+token,
+							data:{
+								"itemId":g_itemVO.id,
+								"amount":1,
+								"promoId":g_itemVO.promoId,
+								"promoToken":promoToken
+							},
+							xhrFields:{withCredentials:true},
+							success:function(data){
+								if(data.status == "success"){
+									alert("下单成功");
+									window.location.reload();
+								}else{
+									alert("下单失败，原因为"+data.data.errMsg);
+									if(data.data.errCode == 20003){
+										window.location.href="login.html";
+									}
+								}
+							},
+							error:function(data){
+								alert("下单失败，原因为"+data.responseText);
+							}
+						});
+					}else{
+						alert("获取令牌失败，原因为"+data.data.errMsg);
+						if(data.data.errCode == 20003){
+							window.location.href="login.html";
+						}
+					}
+				},
+				error:function(data){
+					alert("获取令牌失败，原因为"+data.responseText);
+				}
+			});
+		});
+		$("#createorder").on("click",function(){
+			//可以直接先在前端判定 是否存在登陆凭证
+			var token = window.localStorage["token"];
+			if(token == null){
+				alert("没有登录，不能下单");
+				window.location.href="login.html";
+			}
+			$("#verifyDiv img").attr("src","http://localhost:8080/seckill/order/generateverifycode?token="+token);
+			$("#verifyDiv").show();
+		});
+		//获取商品详情
+		$.ajax({
+			type:"GET",
+			url:"http://localhost:8080/seckill/item/get",
+			data:{
+				"id":getParam("id"),
+			},
+			xhrFields:{withCredentials:true},
+			success:function(data){
+				if(data.status == "success"){
+					g_itemVO = data.data;
+					reloadDom();
+					if(g_itemVO.promoStatus != 0) {//秒杀活动存在且没有结束才会触发定时器刷新倒计时
+						seckillCountDown = setInterval(reloadDom, 1000);
+					}
+				}else{
+					alert("获取信息失败，原因为"+data.data.errMsg);
+				}
+			},
+			error:function(data){
+				alert("获取信息失败，原因为"+data.responseText);
+			}
+		});
+
+	});
+
+
+	function reloadDom(){
+		$("#title").text(g_itemVO.title);
+		$("#description").text(g_itemVO.description);
+		$("#stock").text(g_itemVO.stock);
+		$("#price").text(g_itemVO.price);
+		$("#imgUrl").attr("src",g_itemVO.imgUrl);
+		$("#sales").text(g_itemVO.sales);
+		if(g_itemVO.promoStatus == 0)//如果本身就没有秒杀活动就不执行下面的秒杀逻辑
+			return;
+		//这里在itemVo里又设置一个秒杀结束时间,在秒杀进行中验证,到了结束时间更改promoStatus=0 即可取消秒杀价格改为正常价格
+		var endTime,nowTime;
+		endTime = g_itemVO.endDate.replace(new RegExp("-","gm"),"/");
+		endTime = (new Date(endTime)).getTime();
+		nowTime = Date.parse(new Date());
+		if(endTime - nowTime<=0) {
+			//这里g_itemVO可能是之前本地缓存Guava Cache中取出的秒杀状态不为0,但是活动已经结束了,
+			//因为本地缓存一般不会修改,这里放到前端去判断是否定时器进行秒杀活动
+			$("#promoPriceContainer").hide();//隐藏秒杀价格
+			$("#normalPriceContainer").show();//显示正常价格
+			$("#promoStartDate").text("");
+			g_itemVO.promoStatus=0;
+			//有可能一级缓存再次取到的还是之前秒杀态的itemVo,所以要在前端判断实际的结束时间 是否秒杀还在进行中
+			g_itemVO.promoId=null;// 这里避免后端报出 "当前的秒杀活动已失效,请刷新页面"异常
+			clearInterval(seckillCountDown);
+			return;
+		}
+		if(g_itemVO.promoStatus == 1){//本地缓存取出的数据 实际已经秒杀进行中,但之前的状态还是未开始,delta会
+			//秒杀活动还未开始
+			var startTime = g_itemVO.startDate.replace(new RegExp("-","gm"),"/");
+			startTime = (new Date(startTime)).getTime();
+			nowTime = Date.parse(new Date());
+			var delta = (startTime - nowTime)/1000;
+
+			if(delta <= 0){//倒计时为0 表示活动开始
+				//活动开始了
+				g_itemVO.promoStatus = 2;
+				return;
+			}
+			$("#promoStartDate").text("秒杀活动将于： "+g_itemVO.startDate+" 开始售卖 倒计时："+delta+" 秒");
+			$("#promoPriceContainer").show();
+			$("#promoPrice").text(g_itemVO.promoPrice);
+			//秒杀活动未开始 不能下单
+			$("#createorder").attr("disabled",true);
+		}else if(g_itemVO.promoStatus == 2){
+			if(endTime - nowTime<=1000) {// 这里差值是ms所以要乘1000 这里要比前面的判定提前一点这个alert才会打印出来
+				alert("秒杀活动已结束,商品价格已恢复至正常价");
+			}
+			//秒杀活动正在进行中
+			$("#promoStartDate").text("秒杀正在进行中");
+			$("#promoPrice").text(g_itemVO.promoPrice);
+			//秒杀活动开始 下单按钮显示出来
+			$("#createorder").attr("disabled",false);
+			$("#promoPriceContainer").show();//显示秒杀价格
+			$("#normalPriceContainer").hide();//隐藏正常价格
+		}
+	}
+
+
+</script>
+
+
+
+
+</html>
